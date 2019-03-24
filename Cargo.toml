@@ -1,0 +1,7 @@
+[package]
+name = "dynamic-linking-statistics"
+version = "0.1.0"
+authors = ["lle-bout"]
+edition = "2018"
+
+[dependencies]
