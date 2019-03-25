@@ -1,7 +1,6 @@
 use clap::{App, Arg};
 use goblin::pe::export::ExportAddressTableEntry::{ExportRVA, ForwarderRVA};
 use goblin::pe::import::SyntheticImportLookupTableEntry::{HintNameTableRVA, OrdinalNumber};
-use goblin::Object;
 use rusqlite::{Connection, ToSql};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -135,152 +134,133 @@ fn main() {
                     &[&hex_hash as &ToSql],
                     |row| row.get::<_, i64>(0),
                 ) {
-                    if let Ok(parsed) = Object::parse(&buffer) {
-                        match parsed {
-                            Object::Elf(_elf) => {
-                                eprintln!(
-                                    "{} elf: {}",
-                                    path.to_str().unwrap_or("<could not decode path>"),
-                                    "unimplemented"
-                                );
-                            }
-                            Object::PE(pe) => {
-                                let mut imports: HashMap<String, Vec<String>> = HashMap::new();
+                    if let Ok(pe) = goblin::pe::PE::parse(&buffer) {
+                        let mut imports: HashMap<String, Vec<String>> = HashMap::new();
 
-                                if let Some(x) = pe.import_data {
-                                    for import in x.import_data {
-                                        let mut names = Vec::new();
-                                        let mut break_early = false;
+                        if let Some(x) = pe.import_data {
+                            for import in x.import_data {
+                                let mut names = Vec::new();
+                                let mut break_early = false;
 
-                                        if let Some(ilt) = import.import_lookup_table {
-                                            for entry in ilt {
-                                                match entry {
-                                                    HintNameTableRVA((_, hint_entry)) => {
-                                                        names.push(hint_entry.name.to_string())
-                                                    }
-                                                    OrdinalNumber(ordinal) => {
-                                                        let mut found = false;
+                                if let Some(ilt) = import.import_lookup_table {
+                                    for entry in ilt {
+                                        match entry {
+                                            HintNameTableRVA((_, hint_entry)) => {
+                                                names.push(hint_entry.name.to_string())
+                                            }
+                                            OrdinalNumber(ordinal) => {
+                                                let mut found = false;
 
-                                                        for path in library_paths.iter() {
-                                                            if path.is_dir() {
-                                                                if let Ok(entries) =
-                                                                    fs::read_dir(path)
-                                                                {
-                                                                    for entry in entries {
-                                                                        if let Ok(entry) = entry {
-                                                                            let path = entry.path();
-                                                                            if path.is_file() {
-                                                                                if entry
-                                                                                .file_name()
-                                                                                .to_str()
-                                                                                .unwrap()
+                                                for path in library_paths.iter() {
+                                                    if path.is_dir() {
+                                                        if let Ok(entries) = fs::read_dir(path) {
+                                                            for entry in entries {
+                                                                if let Ok(entry) = entry {
+                                                                    let path = entry.path();
+                                                                    if path.is_file() {
+                                                                        if entry
+                                                                            .file_name()
+                                                                            .to_str()
+                                                                            .unwrap()
+                                                                            .to_lowercase()
+                                                                            == import
+                                                                                .name
                                                                                 .to_lowercase()
-                                                                                == import
-                                                                                    .name
-                                                                                    .to_lowercase()
+                                                                        {
+                                                                            if let Ok(file) =
+                                                                                fs::File::open(path)
                                                                             {
-                                                                                if let Ok(
-                                                                                    mut file,
-                                                                                ) =
-                                                                                    fs::File::open(
-                                                                                        path,
+                                                                                let mut buffer =
+                                                                                    Vec::new();
+                                                                                if file
+                                                                                .take(41943040 /* 40 MB */)
+                                                                                    .read_to_end(
+                                                                                        &mut buffer,
                                                                                     )
+                                                                                    .is_ok()
                                                                                 {
-                                                                                    let mut buffer =
-                                                                                        Vec::new();
-                                                                                    if file.read_to_end(&mut buffer).is_ok() {
-                                                                                        if let Ok(parsed) =
-                                                                                            Object::parse(&buffer)
+                                                                                    if let Ok(pe) =
+                                                                                            goblin::pe::PE::parse(&buffer)
                                                                                         {
-                                                                                            match parsed {
-                                                                                                Object::PE(pe) => {
-                                                                                                    if let Some(
-                                                                                                        export_data,
-                                                                                                    ) = pe.export_data
-                                                                                                    {
-                                                                                                        if let Some(export_rva) = export_data.export_address_table.get((ordinal as u32 - export_data.export_directory_table.ordinal_base) as usize) {
-                                                                                                            let export_rva = match export_rva {
-                                                                                                                ExportRVA(x) => x,
-                                                                                                                ForwarderRVA(x) => x,
-                                                                                                            };
+                                                                                           
+                                                                                            if let Some(
+                                                                                                export_data,
+                                                                                                ) = pe.export_data
+                                                                                            {
+                                                                                                if let Some(export_rva) = export_data.export_address_table.get((ordinal as u32 - export_data.export_directory_table.ordinal_base) as usize) {
+                                                                                                    let export_rva = match export_rva {
+                                                                                                        ExportRVA(x) => x,
+                                                                                                        ForwarderRVA(x) => x,
+                                                                                                    };
 
-                                                                                                            if let Some(export) = pe.exports.iter().filter(|e| e.rva == *export_rva as usize).next() {
-                                                                                                                if let Some(name) = export.name {
-                                                                                                                    found = true;
-                                                                                                                    names.push(name.to_string());
-                                                                                                                }
-                                                                                                            }
+                                                                                                    if let Some(export) = pe.exports.iter().filter(|e| e.rva == *export_rva as usize).next() {
+                                                                                                        if let Some(name) = export.name {
+                                                                                                            found = true;
+                                                                                                            names.push(name.to_string());
                                                                                                         }
                                                                                                     }
                                                                                                 }
-                                                                                                _ => {}
-                                                                                            };
+                                                                                            }
+                                                                                            
                                                                                         }
-                                                                                    }
                                                                                 }
-                                                                            }
                                                                             }
                                                                         }
                                                                     }
                                                                 }
                                                             }
                                                         }
-                                                        if found == false {
-                                                            break_early = true;
-                                                            break;
-                                                        }
                                                     }
-                                                };
+                                                }
+                                                if found == false {
+                                                    break_early = true;
+                                                    break;
+                                                }
                                             }
-                                        }
-                                        if break_early == false {
-                                            imports.insert(import.name.to_string(), names);
-                                        }
+                                        };
                                     }
                                 }
-
-                                let mut statistics: HashMap<(String, String, isize), String> =
-                                    HashMap::new();
-
-                                for kv_imports in imports.iter() {
-                                    let (library, symbols) = kv_imports;
-
-                                    for (index, symbol) in symbols.iter().enumerate() {
-                                        for (r_index, r_symbol) in symbols.iter().enumerate() {
-                                            if r_index == index {
-                                                continue;
-                                            }
-
-                                            let relative_index =
-                                                (r_index as isize) - (index as isize);
-
-                                            if relative_index > 0 && relative_index > max_offset {
-                                                continue;
-                                            } else if relative_index < 0
-                                                && relative_index < -max_offset
-                                            {
-                                                continue;
-                                            }
-
-                                            statistics.insert(
-                                                (
-                                                    library.to_string(),
-                                                    symbol.to_string(),
-                                                    relative_index,
-                                                ),
-                                                r_symbol.to_string(),
-                                            );
-                                        }
-                                    }
+                                if break_early == false {
+                                    imports.insert(import.name.to_string(), names);
                                 }
+                            }
+                        }
 
-                                println!("adding/updating {} records", statistics.len());
+                        let mut statistics: HashMap<(String, String, isize), String> =
+                            HashMap::new();
 
-                                let now = std::time::Instant::now();
+                        for kv_imports in imports.iter() {
+                            let (library, symbols) = kv_imports;
 
-                                let mut stmt = conn
-                                    .prepare(
-                                        "INSERT INTO
+                            for (index, symbol) in symbols.iter().enumerate() {
+                                for (r_index, r_symbol) in symbols.iter().enumerate() {
+                                    if r_index == index {
+                                        continue;
+                                    }
+
+                                    let relative_index = (r_index as isize) - (index as isize);
+
+                                    if relative_index > 0 && relative_index > max_offset {
+                                        continue;
+                                    } else if relative_index < 0 && relative_index < -max_offset {
+                                        continue;
+                                    }
+
+                                    statistics.insert(
+                                        (library.to_string(), symbol.to_string(), relative_index),
+                                        r_symbol.to_string(),
+                                    );
+                                }
+                            }
+                        }
+
+                        println!("adding/updating {} records", statistics.len());
+
+                        let now = std::time::Instant::now();
+
+                        let mut stmt = conn
+                            .prepare(
+                                "INSERT INTO
                                                     order_stats (
                                                         file_format,
                                                         library,
@@ -290,14 +270,14 @@ fn main() {
                                                     )
                                                 VALUES
                                                     (?, ?, ?, ?, ?)",
-                                    )
-                                    .unwrap();
+                            )
+                            .unwrap();
 
-                                for kv_statistics in statistics.iter() {
-                                    let ((lib, sym, index), r_sym) = kv_statistics;
+                        for kv_statistics in statistics.iter() {
+                            let ((lib, sym, index), r_sym) = kv_statistics;
 
-                                    if let Ok(rowid) = conn.query_row(
-                                        "                       SELECT
+                            if let Ok(rowid) = conn.query_row(
+                                "                       SELECT
                                                                 rowid
                                                             FROM
                                                                 order_stats
@@ -311,54 +291,34 @@ fn main() {
                                                                 relative_position = ?
                                                             AND
                                                                 symbol_at_position = ?",
-                                        &[&"pe" as &ToSql, lib, sym, index, r_sym],
-                                        |row| row.get::<_, i64>(0),
-                                    ) {
-                                        conn.execute(
-                                            "UPDATE
+                                &[&"pe" as &ToSql, lib, sym, index, r_sym],
+                                |row| row.get::<_, i64>(0),
+                            ) {
+                                conn.execute(
+                                    "UPDATE
                                             order_stats
                                         SET
                                             count = count + 1
                                         WHERE
                                             rowid = ?",
-                                            &[&rowid as &ToSql],
-                                        )
-                                        .unwrap();
-                                    } else {
-                                        stmt.execute(&[&"pe" as &ToSql, lib, sym, index, r_sym])
-                                            .unwrap();
-                                    }
-                                }
-
-                                println!("completed in {} ms", now.elapsed().as_millis());
+                                    &[&rowid as &ToSql],
+                                )
+                                .unwrap();
+                            } else {
+                                stmt.execute(&[&"pe" as &ToSql, lib, sym, index, r_sym])
+                                    .unwrap();
                             }
-                            Object::Mach(_mach) => {
-                                eprintln!(
-                                    "{} mach: {}",
-                                    path.to_str().unwrap_or("<could not decode path>"),
-                                    "unimplemented"
-                                );
-                            }
-                            Object::Archive(_archive) => {
-                                eprintln!(
-                                    "{} archive: {}",
-                                    path.to_str().unwrap_or("<could not decode path>"),
-                                    "excluded from study"
-                                );
-                            }
-                            Object::Unknown(_magic) => eprintln!(
-                                "{} unknown magic",
-                                path.to_str().unwrap_or("<could not decode path>")
-                            ),
                         }
-                    }
 
-                    conn.execute(
-                        "INSERT INTO processed_objects (sha256) VALUES (?)",
-                        &[&hex_hash as &ToSql],
-                    )
-                    .unwrap();
+                        println!("completed in {} ms", now.elapsed().as_millis());
+                    }
                 }
+
+                conn.execute(
+                    "INSERT INTO processed_objects (sha256) VALUES (?)",
+                    &[&hex_hash as &ToSql],
+                )
+                .unwrap();
             }
         }
     };

@@ -6,7 +6,8 @@ edition = "2018"
 
 [dependencies]
 # goblin = "0.0.21"
-goblin = { git = "https://github.com/leo-lb/goblin/", branch = "iat-synthetic-imports" }
+goblin = { default-features = false, features = ["std", "pe32", "pe64", "endian_fd"], git = "https://github.com/leo-lb/goblin/", branch = "iat-synthetic-imports" }
+
 rusqlite = "0.17"
 clap = "2"
 sha2 = "0.8"
