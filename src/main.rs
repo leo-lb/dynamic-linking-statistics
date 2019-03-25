@@ -116,9 +116,14 @@ fn main() {
             path.to_str().unwrap_or("<could not decode path>")
         );
 
-        if let Ok(mut file) = fs::File::open(path) {
+        if let Ok(file) = fs::File::open(path) {
             let mut buffer = Vec::new();
-            if file.read_to_end(&mut buffer).is_ok() {
+
+            if file
+                .take(41943040 /* 40 MB */)
+                .read_to_end(&mut buffer)
+                .is_ok()
+            {
                 let mut hasher = Sha256::new();
 
                 hasher.input(&buffer);
