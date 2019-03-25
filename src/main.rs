@@ -99,6 +99,7 @@ fn main() {
     };
 
     let max_offset: usize = matches.value_of("max_offset").unwrap().parse().unwrap();
+    let max_offset: isize = max_offset as isize;
 
     let library_paths: Vec<PathBuf> = match matches.is_present("library_path") {
         true => matches
@@ -245,11 +246,22 @@ fn main() {
                                                 continue;
                                             }
 
+                                            let relative_index =
+                                                (r_index as isize) - (index as isize);
+
+                                            if relative_index > 0 && relative_index > max_offset {
+                                                continue;
+                                            } else if relative_index < 0
+                                                && relative_index < -max_offset
+                                            {
+                                                continue;
+                                            }
+
                                             statistics.insert(
                                                 (
                                                     library.to_string(),
                                                     symbol.to_string(),
-                                                    ((r_index as isize) - (index as isize)),
+                                                    relative_index,
                                                 ),
                                                 r_symbol.to_string(),
                                             );
@@ -276,12 +288,7 @@ fn main() {
                                     )
                                     .unwrap();
 
-                                for kv_statistics in
-                                    statistics.iter().filter(|((_lib, _sym, index), _r_sym)| {
-                                        max_offset as isize >= *index
-                                            && -*index >= -(max_offset as isize)
-                                    })
-                                {
+                                for kv_statistics in statistics.iter() {
                                     let ((lib, sym, index), r_sym) = kv_statistics;
 
                                     if let Ok(rowid) = conn.query_row(
