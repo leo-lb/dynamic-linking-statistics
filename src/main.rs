@@ -318,7 +318,7 @@ fn main() {
                     "INSERT INTO processed_objects (sha256) VALUES (?)",
                     &[&hex_hash as &ToSql],
                 )
-                .unwrap();
+                .is_err();
             }
         }
     };
