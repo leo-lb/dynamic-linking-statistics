@@ -52,7 +52,8 @@ fn main() {
                 .short("l")
                 .long("library-path")
                 .help("Directories from which libraries can be looked up for necessary information")
-                .takes_value(true),
+                .takes_value(true)
+                .multiple(true),
         )
         .get_matches();
 
