@@ -98,7 +98,7 @@ fn main() {
         false => std::env::current_dir().unwrap(),
     };
 
-    let max_offset: usize = matches.value_of("max-offset").unwrap().parse().unwrap();
+    let max_offset: usize = matches.value_of("max_offset").unwrap().parse().unwrap();
 
     let library_paths: Vec<PathBuf> = match matches.is_present("library_path") {
         true => matches
