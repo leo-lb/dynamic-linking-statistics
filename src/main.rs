@@ -55,6 +55,15 @@ fn main() {
                 .takes_value(true)
                 .multiple(true),
         )
+        .arg(
+            Arg::with_name("max_offset")
+                .short("m")
+                .long("max-offset")
+                .help("Maximum relative offset to make statistics of")
+                .takes_value(true)
+                .number_of_values(1)
+                .default_value("3"),
+        )
         .get_matches();
 
     let sqlite_path = matches.value_of("sqlite").unwrap().to_owned();
@@ -88,6 +97,8 @@ fn main() {
         true => std::path::PathBuf::from(matches.value_of("files").unwrap()),
         false => std::env::current_dir().unwrap(),
     };
+
+    let max_offset: usize = matches.value_of("max-offset").unwrap().parse().unwrap();
 
     let library_paths: Vec<PathBuf> = match matches.is_present("library_path") {
         true => matches
@@ -265,7 +276,12 @@ fn main() {
                                     )
                                     .unwrap();
 
-                                for kv_statistics in statistics.iter() {
+                                for kv_statistics in
+                                    statistics.iter().filter(|((_lib, _sym, index), _r_sym)| {
+                                        max_offset as isize >= *index
+                                            && -*index >= -(max_offset as isize)
+                                    })
+                                {
                                     let ((lib, sym, index), r_sym) = kv_statistics;
 
                                     if let Ok(rowid) = conn.query_row(
