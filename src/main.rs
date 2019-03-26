@@ -63,7 +63,39 @@ fn main() {
                 .number_of_values(1)
                 .default_value("3"),
         )
-        .get_matches();
+        .subcommand(clap::SubCommand::with_name("generate")
+                .arg(
+                    Arg::with_name("mangled_symbols")
+                        .number_of_values(1)
+                        .takes_value(true)
+                        .required(true)
+                        .short("z")
+                        .long("mangled-symbols")
+                        .help("File that contains a list of mangled library symbols (export with MSVC dumpbin or others)"),
+                )
+                .arg(
+                    Arg::with_name("library_list")
+                        .takes_value(true)
+                        .multiple(true)
+                        .short("h")
+                        .long("library-list")
+                        .help("List of library names to restrict to")
+                )
+                .arg(
+                    Arg::with_name("file_format")
+                        .takes_value(true)
+                        .short("p")
+                        .long("file-format")
+                        .help("File format to restrict to")
+                )
+                .arg(Arg::with_name("amount")
+                        .takes_value(true)
+                        .default_value("10")
+                        .short("a")
+                        .long("amount")
+                        .help("Amount of mangled symbols to generate")
+                )
+        ).get_matches();
 
     let sqlite_path = matches.value_of("sqlite").unwrap().to_owned();
     let conn = Connection::open(sqlite_path).unwrap();
@@ -81,7 +113,9 @@ fn main() {
                     relative_position INTEGER,
                     symbol_at_position TEXT,
                     count INTEGER DEFAULT 1 NOT NULL,
-                    PRIMARY KEY (file_format, library, symbol, relative_position, symbol_at_position)
+                    PRIMARY KEY (file_format, library, symbol, relative_position, symbol_at_position),
+                    PRIMARY KEY (symbol, symbol_at_position, relative_position, library),
+                    PRIMARY KEY (symbol, library)
                 );
             CREATE TABLE IF NOT EXISTS
                 processed_objects (
@@ -91,6 +125,118 @@ fn main() {
     ",
     )
     .unwrap();
+
+    if let ("generate", Some(g_matches)) = matches.subcommand() {
+        use lazy_static::lazy_static;
+        use regex::Regex;
+
+        lazy_static! {
+            static ref MANGLED_RE: Regex = Regex::new(
+                r"(?m)^(?P<prefix>_|@)(?P<name>\w+?)(?P<suffix>@\d+)?$").unwrap();
+        }
+
+        let mangled_path = g_matches.value_of("mangled_symbols").unwrap().to_owned();
+        let library_list: Vec<String> = match g_matches.is_present("library_list") {
+            true => g_matches
+                .values_of("library_list")
+                .unwrap()
+                .map(|x| x.to_string())
+                .collect(),
+            false => Vec::new(),
+        };
+
+        let query = format!("{} COLLATE NOCASE", "OR library = ? ".repeat(library_list.len()));
+        let query = query.replacen("OR", "AND", 1);
+
+        let mut mangled_file = String::new();
+
+        fs::File::open(mangled_path).unwrap().read_to_string(&mut mangled_file).unwrap();
+
+        let captures = MANGLED_RE.captures_iter(&mangled_file);
+
+        use rand::prelude::*;
+        use rand::seq::IteratorRandom;
+
+        let mut rng = thread_rng();
+
+        let captures_vec: Vec<(String, String)> = captures.map(|cap| (cap["name"].to_string(), cap[0].to_string())).collect();
+
+        let start = captures_vec.iter().filter_map(|(name, full)| {
+                            let mut args = vec![name.to_string()].to_vec();
+                            args.append(&mut library_list.clone());
+
+                            let q = conn.query_row(
+                                &format!("SELECT rowid, library, symbol FROM order_stats WHERE symbol = ? {}", query),
+                                args,
+                                move |row| Ok((row.get::<_, i64>(0).unwrap(), row.get::<_, String>(1).unwrap(), row.get::<_, String>(2).unwrap(), full.to_string().to_owned()))
+                            );
+
+                            if q.is_ok() {
+                                Some(q.unwrap())
+                            } else {
+                                None
+                            }
+                        })
+                .choose(&mut rng).unwrap();
+
+        let (_rowid, _library, symbol, mangled) = start;
+
+        let mut result: Vec<String> = Vec::new();
+
+        result.push(mangled.to_string());
+
+
+        let mut last_added = symbol;
+
+
+        println!("{}", last_added);
+
+        for _ in 0..g_matches.value_of("amount").unwrap().parse().unwrap() {
+
+            use rand::seq::SliceRandom;
+
+        let weights: Vec<(String, String, String, i64, String)> = captures_vec.iter().filter_map(|(name, full)| {
+                            let mut args = vec![last_added.to_string(), name.to_string(), "1".to_string()].to_vec();
+                            args.append(&mut library_list.clone());
+
+                            for x in result.iter() {
+                                if x == full {
+                                    return None;
+                                }
+                            }
+
+                            let q = conn.query_row(
+                                &format!("SELECT library, symbol, symbol_at_position, count FROM order_stats WHERE symbol = ? AND symbol_at_position = ? AND relative_position = ? {}", query),
+                                args,
+                                move |row| Ok((row.get::<_, String>(0).unwrap(), row.get::<_, String>(1).unwrap(), row.get::<_, String>(2).unwrap(), row.get::<_, i64>(3).unwrap(), full.to_string().to_owned()))
+                            );
+
+                            if q.is_ok() {
+                                Some(q.unwrap())
+                            } else {
+                                None
+                            }
+                        }).collect();
+
+            let filtered: Vec<_> = weights.iter().collect();
+             
+            let (_, _, symbol_at_position, _, next) = filtered.choose_weighted(&mut rng, |(_library, _symbol, _symbol_at_position, count, _mangled)| *count).unwrap();
+
+
+        result.push(next.to_string());
+        last_added = symbol_at_position.to_string();
+
+        println!("{}", last_added);
+
+        }
+
+        println!("\n\n");
+        for x in result.iter() {
+            println!("{}", x);
+        }
+
+        return;
+    }
 
     let files_path = match matches.is_present("files") {
         true => std::path::PathBuf::from(matches.value_of("files").unwrap()),
